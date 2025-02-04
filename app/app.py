@@ -16,7 +16,7 @@ from pandas import DataFrame
 LANGUAGES: dict[str, str] = {
     "English": "You are a helpful assistant that speaks English.",
     "Spanish": "Tu eres un asistente útil que habla español.",
-    "Hebrew": "אתה עוזר טוב שמפגש בעברית.",
+    "Hebrew": " אתה עוזר טוב ומועיל שמדבר בעברית ועונה בעברית.",
     "Dutch": "Je bent een handige assistent die Nederlands spreekt.",
     "Italian": "Tu sei un assistente utile che parla italiano.",
     "French": "Tu es un assistant utile qui parle français.",
