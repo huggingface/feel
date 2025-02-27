@@ -1,35 +1,57 @@
+import os
 import torch
 from dataclasses import dataclass
 from accelerate import PartialState
 from transformers import AutoModelForCausalLM, AutoTokenizer, HfArgumentParser
 from trl import KTOConfig, KTOTrainer, ModelConfig, get_peft_config, maybe_unpair_preference_dataset, setup_chat_format
-from kto_dataset_processor import process_dataset_ultrafeedback
+from kto_dataset_processor import process_feel_dataset, SupportedLanguages
 from datetime import datetime
 import wandb
+from enum import Enum
+from typing import Optional
+
+
+# PEFT library: attach and load adapters
+from peft import get_peft_model, PeftModel
 
 ####################################
 #  CONFIGURATION
 ####################################
+
 
 @dataclass
 class ScriptArguments:
     """
     Configuration for the script.
     """
-    process_dataset_func: callable = process_dataset_ultrafeedback  # process_dataset function from kto_dataset_processor.py
-    checkpoint_path: str = None  # Checkpoint path
-    push_to_hub: bool = False  # Whether to push the model to the Hugging Face hub
+    process_dataset_func: callable = process_feel_dataset
+    checkpoint_path: str = None
+    push_to_hub: bool = True
+    language: str = "English"  # Default to English
+
+    def __post_init__(self):
+        """Validate the language after initialization"""
+        try:
+            # This will raise ValueError if language is not in the enum
+            SupportedLanguages(self.language)
+        except ValueError:
+            supported_langs = "\n- ".join([lang.value for lang in SupportedLanguages])
+            raise ValueError(
+                f"Invalid language: '{self.language}'\n"
+                f"Supported languages are:\n- {supported_langs}"
+            )
 
 @dataclass
 class ModelArguments(ModelConfig):
     """
     Configuration for the model.
     """
-    model_name: str = "HuggingFaceH4/zephyr-7b-beta"
+    model_name: str = "CohereForAI/aya-expanse-8b"
     use_peft: bool = True
     lora_target_modules: str = "all-linear"
     lora_r: int = 16
     lora_alpha: int = 16
+    trust_remote_code: bool = True
 
 @dataclass
 class TrainingArguments(KTOConfig):
@@ -38,7 +60,7 @@ class TrainingArguments(KTOConfig):
     """
     output_dir: str = f"kto_{ModelArguments.model_name}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     num_train_epochs: int = 1
-    per_device_train_batch_size: int = 4  # Highest that runs well
+    per_device_train_batch_size: int = 4
     learning_rate: float = 5e-7
     lr_scheduler_type: str = "cosine"
     gradient_accumulation_steps: int = 1
@@ -47,8 +69,6 @@ class TrainingArguments(KTOConfig):
     warmup_ratio: float = 0.1
     bf16: bool = True
     logging_first_step: bool = True
-
-
 
 # Initialize configurations
 script_args = ScriptArguments()
@@ -61,7 +81,7 @@ model_args = ModelArguments()
 
 def load_model_and_tokenizer(model_args):
     """
-    Load a model and tokenizer from a specified path.
+    Load the base model and tokenizer from the Hugging Face Hub.
     """
     model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name,
@@ -74,74 +94,52 @@ def load_model_and_tokenizer(model_args):
         trust_remote_code=model_args.trust_remote_code
     )
 
-    # Set pad token if missing
+    # Set pad token if it is missing
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Setup chat format if not present
-    if tokenizer.chat_template is None:
+    # Setup chat format if not available on the tokenizer
+    if not getattr(tokenizer, "chat_template", None):
         model, tokenizer = setup_chat_format(model, tokenizer)
 
-
-
     return model, tokenizer
-
-
-# def find_unknown_tokens(tokenizer, texts):
-#     """
-#     Identify tokens in the dataset that are not in the tokenizer's vocabulary.
-#     """
-#     all_tokens = set()
-#     for text in texts:
-#         tokens = tokenizer.tokenize(text)
-#         all_tokens.update(tokens)
-#     vocab = set(tokenizer.get_vocab().keys())
-#     unknown_tokens = all_tokens - vocab
-#     return unknown_tokens
-
-
-# def add_tokens_to_tokenizer(tokenizer, model, dataset):
-#     """
-#     Extend the tokenizer's vocabulary with missing tokens and resize the model embeddings.
-#     """
-#     # Extract all texts from the dataset
-#     texts = [example["completion"] for example in dataset["train"]]
-
-#     # Identify unknown tokens
-#     unknown_tokens = find_unknown_tokens(tokenizer, texts)
-#     print(f"Found {len(unknown_tokens)} unknown tokens: {list(unknown_tokens)[:10]}...")
-
-#     # Add unknown tokens to tokenizer
-#     tokenizer.add_tokens(list(unknown_tokens))
-#     model.resize_token_embeddings(len(tokenizer))
-#     print(f"Tokenizer vocabulary size after extension: {len(tokenizer)}")
-
 
 ####################################
 #  MAIN LOGIC
 ####################################
 
 def main():
-    # Initialize wandb
+    # Initialize wandb for logging
     wandb.init(project="kto")
 
-    # Load models and tokenizer
-    print("Loading models and tokenizer...")
+    print("Loading base model and tokenizer...")
     model, tokenizer = load_model_and_tokenizer(model_args)
     ref_model, _ = load_model_and_tokenizer(model_args)
     print("Models and tokenizer loaded.")
 
-    # Load and process datasets using external function
+    # -----------------------------
+    # Adapter Loading or Initialization
+    # -----------------------------
+    # Configure the PEFT / LoRA adapter settings
+    peft_config = get_peft_config(model_args)
+    adapter_dir = os.path.join("adapters", script_args.language)
+
+    if os.path.isdir(adapter_dir):
+        # If an adapter for this language already exists, load it into the base model.
+        model = PeftModel.from_pretrained(model, adapter_dir, is_trainable=True)
+        print(f"Loaded existing adapter for language '{script_args.language}' from {adapter_dir}.")
+    else:
+        # Otherwise, initialize a new LoRA adapter.
+        model = get_peft_model(model, peft_config)
+        print(f"No adapter found for language '{script_args.language}'. Initialized new adapter.")
+
+    # -----------------------------
+    # Data Preparation and Training
+    # -----------------------------
     print("Processing dataset...")
-    dataset = process_dataset_ultrafeedback()
+    dataset = script_args.process_dataset_func(script_args.language)
     print("Dataset processed.")
 
-    # # Extend tokenizer with missing tokens
-    # print("Adding unknown tokens to tokenizer...")
-    # add_tokens_to_tokenizer(tokenizer, model, dataset)
-    # print("Tokenizer updated.")
-
-    # Initialize trainer
     print("Initializing trainer...")
     trainer = KTOTrainer(
         model=model,
@@ -149,8 +147,8 @@ def main():
         args=training_args,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"],
-        tokenizer=tokenizer,
-        peft_config=get_peft_config(model_args),
+        processing_class=tokenizer,
+        peft_config=peft_config,
     )
 
     # Training
@@ -182,10 +180,22 @@ def main():
         "step": metrics.get("step")
     })
 
-    # Save model and optionally push to hub
-    trainer.save_model(training_args.output_dir)
+    # -----------------------------
+    # Adapter Saving
+    # -----------------------------
+    print("Saving adapter...")
+    # Add timestamp to adapter directory
+    timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    new_adapter_dir = os.path.join(adapter_dir, f"version_{timestamp}")
+    os.makedirs(new_adapter_dir, exist_ok=True)
+    model.save_pretrained(new_adapter_dir)
+    print(f"Adapter for language '{script_args.language}' saved to: {new_adapter_dir}")
+
     if script_args.push_to_hub:
-        trainer.push_to_hub()
+        # Using a consistent naming pattern that links to the FEEL project
+        repo_id = f"feel-fl/kto-lora-adapter-{script_args.language}"
+        print(f"Pushing adapter to Hugging Face Hub at {repo_id}...")
+        model.push_to_hub(repo_id=repo_id)
 
     print("Process completed.")
 
