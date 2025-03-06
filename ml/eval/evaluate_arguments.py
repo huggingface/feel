@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 @dataclass
 class EvalArguments:
     model_name_or_path: str = field(
-        default="mistralai/Mistral-7B-v0.1", metadata={"help": "Name to a huggingface native pretrained model or path to a model on disk."})
+        default="CohereForAI/aya-expanse-8b", metadata={"help": "Name to a huggingface native pretrained model or path to a model on disk."})
     model_pretrained_lora_weights: str = field(
         default=None, metadata={"help": "Path to a checkpoint directory."})
     output_filepath: str = field(

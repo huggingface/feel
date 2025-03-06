@@ -45,7 +45,7 @@ ref_model = AutoModelForCausalLM.from_pretrained(
 ).to("cuda")
 print(f'loaded reference model')
 
-# load a tokenaizer
+# load a tokenizer
 ref_tokenizer = AutoTokenizer.from_pretrained(
     ref_model_args.model_name_or_path, trust_remote_code=ref_model_args.trust_remote_code
 )

@@ -11,9 +11,9 @@ class ScriptArguments:
     """
     Arguments for the Bradley-Terry evaluation script.
     """
-    sft_generations_file: str = '/raid/lingo/jen_ben/HF-RLHF/eval/test/gen_examples_idan_mini.json'
-    kto_generations_file: str = '/raid/lingo/jen_ben/HF-RLHF/eval/test/gen_examples_idan_mini.json'
-    output_file: str = 'bt_results_test_mini.json'
+    old_generations_file: str
+    new_generations_file: str   
+    output_file: str = 'bt_results.json'
 
 
 ####################################
@@ -34,63 +34,63 @@ def load_rewards(file_path):
         return json.load(f)
 
 
-def bradley_terry_comparison(sft_rewards, kto_rewards):
+def bradley_terry_comparison(old_rewards, new_rewards):
     """
     Perform Bradley-Terry comparison between two sets of model generations.
 
     Args:
-        sft_rewards (list): List of dictionaries for the SFT model's generations and rewards.
-        kto_rewards (list): List of dictionaries for the KTO model's generations and rewards.
+        old_rewards (list): List of dictionaries for the OLD model's generations and rewards.
+        new_rewards (list): List of dictionaries for the NEW model's generations and rewards.
 
     Returns:
         list: Comparison results including preferred outputs and probabilities.
         dict: Metrics summary including percentage preferred and average probabilities.
     """
     results = []
-    kto_preferred_count = 0
-    sft_preferred_count = 0
+    new_preferred_count = 0
+    old_preferred_count = 0
     probabilities = []
 
-    for ix in range(len(sft_rewards)):
-        sft = sft_rewards[ix]
-        kto = kto_rewards[ix]
+    for ix in range(len(old_rewards)):
+        old = old_rewards[ix]
+        new = new_rewards[ix]
 
         # Ensure prompts match
-        assert sft['prompt'] == kto['prompt'], f"ERROR: Prompts at index {ix} do not match."
+        assert old['prompt'] == new['prompt'], f"ERROR: Prompts at index {ix} do not match."
 
         # Compute Bradley-Terry probability
-        kto_reward = torch.tensor(kto['reward'], dtype=torch.float32)
-        sft_reward = torch.tensor(sft['reward'], dtype=torch.float32)
-        prob_kto_preferred = torch.sigmoid(kto_reward - sft_reward).item()
+        new_reward = torch.tensor(old['reward'], dtype=torch.float32)
+        old_reward = torch.tensor(new['reward'], dtype=torch.float32)
+        prob_new_preferred = torch.sigmoid(new_reward - old_reward).item()
 
-        probabilities.append(prob_kto_preferred)
-        preferred_model = 'kto' if prob_kto_preferred > 0.5 else 'sft'
+        probabilities.append(prob_new_preferred)
+        preferred_model = 'new' if prob_new_preferred > 0.5 else 'old'
 
         # Count preferences
-        if preferred_model == 'kto':
-            kto_preferred_count += 1
+        if preferred_model == 'new':
+            new_preferred_count += 1
         else:
-            sft_preferred_count += 1
+            old_preferred_count += 1
 
         # Log results
         bt_result = {
-            'prompt': sft['prompt'],
-            'sft_output': sft['output'],
-            'kto_output': kto['output'],
-            'sft_reward': sft['reward'],
-            'kto_reward': kto['reward'],
+            'prompt': old['prompt'],
+            'old_output': old['output'],
+            'new_output': new['output'],
+            'old_reward': old['reward'],
+            'new_reward': new['reward'],
             'preferred': preferred_model,
-            'prob_kto_preferred': prob_kto_preferred
+            'prob_new_preferred': prob_new_preferred
         }
         results.append(bt_result)
 
     # Calculate metrics
-    total_examples = len(sft_rewards)
+    total_examples = len(old_rewards)
     metrics = {
         'total_examples': total_examples,
-        'kto_preferred_percentage': 100 * kto_preferred_count / total_examples,
-        'sft_preferred_percentage': 100 * sft_preferred_count / total_examples,
-        'avg_probability_kto_preferred': sum(probabilities) / total_examples
+        'new_preferred_percentage': 100 * new_preferred_count / total_examples,
+        'old_preferred_percentage': 100 * old_preferred_count / total_examples,
+        'avg_probability_new_preferred': sum(probabilities) / total_examples
     }
 
     return results, metrics
@@ -118,9 +118,9 @@ def print_metrics(metrics):
     """
     print("\nEVALUATION METRICS:")
     print(f"Total examples: {metrics['total_examples']}")
-    print(f"Percentage preferred - KTO model: {metrics['kto_preferred_percentage']:.2f}%")
-    print(f"Percentage preferred - SFT model: {metrics['sft_preferred_percentage']:.2f}%")
-    print(f"Average probability of KTO model being preferred: {metrics['avg_probability_kto_preferred']:.4f}")
+    print(f"Percentage preferred - KTO model: {metrics['new_preferred_percentage']:.2f}%")
+    print(f"Percentage preferred - SFT model: {metrics['old_preferred_percentage']:.2f}%")
+    print(f"Average probability of KTO model being preferred: {metrics['avg_probability_new_preferred']:.4f}")
 
 
 ####################################
@@ -128,22 +128,17 @@ def print_metrics(metrics):
 ####################################
 
 def main():
-    # Initialize script arguments
     args = ScriptArguments()
 
-    # Load data
     print("Loading data...")
-    sft_rewards = load_rewards(args.sft_generations_file)
-    kto_rewards = load_rewards(args.kto_generations_file)
+    old_rewards = load_rewards(args.sft_generations_file)
+    new_rewards = load_rewards(args.kto_generations_file)
 
     # Perform Bradley-Terry comparison
     print("Performing Bradley-Terry comparison...")
-    results, metrics = bradley_terry_comparison(sft_rewards, kto_rewards)
+    results, metrics = bradley_terry_comparison(old_rewards, new_rewards)
 
-    # Save results
     save_results(results, args.output_file)
-
-    # Print metrics
     print_metrics(metrics)
 
 
@@ -152,55 +147,3 @@ if __name__ == "__main__":
 
 
 
-# import json
-# import torch
-
-# output_file_path = 'bt_results.json'
-# ref_generations_rewards_file_path = 'ref_models_generations_reward_trl-libqwen1.5-1.8b-sft.json'
-# finetuned_generations_rewards_file_path = 'finetuned_models_generations_reward_trl-libqwen1.5-1.8b-sft.json'
-
-# # Open and read JSON files
-# with open(ref_generations_rewards_file_path, 'r') as f:
-#     ref_rewards = json.load(f)
-
-# with open(finetuned_generations_rewards_file_path, 'r') as g:
-#     finetuned_rewards = json.load(g)
-
-# # assert len(ref_rewards) != len(finetuned_rewards), 'ERROR: files are not with the same length.'
-
-# results = []
-# finetuned_preffered = 0
-# for ix in range(len(ref_rewards)):
-#     ref = ref_rewards[ix]
-#     finetuned = finetuned_rewards[ix]
-#     assert ref['prompt'] == finetuned['prompt'], 'ERROR: ref and finetuned prompt are not the same.'
-
-#     # Bradely Terry
-#     finetuned_reward = torch.tensor(finetuned['reward'], dtype=torch.float32)
-#     ref_reward = torch.tensor(ref['reward'], dtype=torch.float32)
-#     prob_finetuned_preferred = torch.sigmoid(finetuned_reward - ref_reward)
-
-
-#     if prob_finetuned_preferred > 0.5:
-#         finetuned_preffered +=1
-#         print(f'example {ix}: finetuned preffered')
-#     else:
-#         print(f'example {ix}: ref preffered')
-
-#     # log results
-#     bt_result = {}
-#     bt_result['prompt'] = ref['prompt']
-#     bt_result['ref_output'] = ref['output']
-#     bt_result['finetuned_output'] = finetuned['output']
-#     bt_result['ref_reward'] = ref['output']
-#     bt_result['finetuned_reward'] = finetuned['output']
-#     bt_result['preffered'] = 'finetuned' if prob_finetuned_preferred > 0.5 else 'ref'
-#     results.append(bt_result)
-
-
-# # save results in json files
-
-# with open(output_file_path, "w") as f:
-#     json.dump(results, f, indent=4)
-
-# print('BT EVALUATION COMPLETED.')
