@@ -12,13 +12,13 @@ import spaces
 import spaces
 import gradio as gr
 from feedback import save_feedback, scheduler
-from gradio.components.chatbot import Option
+from gradio.components.chatbot import OptionDict
 from huggingface_hub import InferenceClient
 from pandas import DataFrame
 from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
 
 
-BASE_MODEL = os.getenv("MODEL", "CohereForAI/aya-expanse-8b")
+BASE_MODEL = os.getenv("MODEL", "google/gemma-3-12b-it")
 ZERO_GPU = (
     bool(os.getenv("ZERO_GPU", False)) or True
     if str(os.getenv("ZERO_GPU")).lower() == "true"
@@ -438,8 +438,8 @@ def wrangle_edit_data(
         )
         history = history[: index + 1]
         history[-1]["options"] = [
-            Option(label="chosen", value=x.value),
-            Option(label="rejected", value=original_message["content"]),
+            OptionDict(label="chosen", value=x.value),
+            OptionDict(label="rejected", value=original_message["content"]),
         ]
         return history
 
