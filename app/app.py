@@ -18,7 +18,7 @@ from pandas import DataFrame
 from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
 
 
-BASE_MODEL = os.getenv("MODEL", "google/gemma-3-12b-it")
+BASE_MODEL = os.getenv("MODEL", "google/gemma-3-12b-pt")
 ZERO_GPU = (
     bool(os.getenv("ZERO_GPU", False)) or True
     if str(os.getenv("ZERO_GPU")).lower() == "true"
@@ -348,8 +348,11 @@ def wrangle_like_data(x: gr.LikeData, history) -> DataFrame:
             elif x.liked is False:
                 message["metadata"] = {"title": "disliked"}
 
-        if not isinstance(message["metadata"], dict):
+        if message["metadata"] is None:
+            message["metadata"] = {}
+        elif not isinstance(message["metadata"], dict):
             message["metadata"] = message["metadata"].__dict__
+            
         rating = message["metadata"].get("title")
         if rating == "liked":
             message["rating"] = 1
@@ -549,9 +552,36 @@ button#add-language-btn {
 }
 """
 
-with gr.Blocks(css=css) as demo:
+def get_config(request: gr.Request):
+    """Get configuration from cookies"""
+    config = {"feel_consent": False}
+    if request and 'feel_consent' in request.cookies:
+        config["feel_consent"] = request.cookies['feel_consent'] == 'true'
+    return config["feel_consent"]
+
+js = '''function js(){
+    window.set_cookie = function(key, value){
+        // Use a longer expiry and more complete cookie setting
+        const d = new Date();
+        d.setTime(d.getTime() + (365*24*60*60*1000));
+        document.cookie = key + "=" + value + ";path=/;expires=" + d.toUTCString() + ";SameSite=Lax";
+        return value === 'true';  // Return boolean directly
+    }
+    
+    window.check_cookie = function(key){
+        const value = document.cookie
+            .split('; ')
+            .find(row => row.startsWith(key + '='))
+            ?.split('=')[1];
+        return value === 'true';  // Return boolean directly
+    }
+}'''
+
+
+
+with gr.Blocks(css=css, js=js) as demo:
     # State variable to track if user has consented
-    user_consented = gr.State(False)
+    user_consented = gr.State(value=False)  
     
     # Landing page with user agreement
     with gr.Group(visible=True) as landing_page:
@@ -627,7 +657,6 @@ with gr.Blocks(css=css) as demo:
         chatbot = gr.Chatbot(
             elem_id="chatbot",
             editable="all",
-            bubble_full_width=False,
             value=[
                 {
                     "role": "system",
@@ -650,15 +679,38 @@ with gr.Blocks(css=css) as demo:
 
         submit_btn = gr.Button(value="💾 Submit conversation", visible=False)
 
+    # Check consent on page load
+    demo.load(
+        fn=lambda: None,
+        inputs=None, 
+        outputs=None,
+        js="async () => { await new Promise(r => setTimeout(r, 100)); return js(); }"
+    ).then(
+        fn=lambda: None,
+        inputs=None,
+        outputs=[user_consented],
+        js="() => { return window.check_cookie('feel_consent'); }"
+    ).then(
+        lambda has_consent: (gr.Group(visible=not has_consent), gr.Group(visible=has_consent)),
+        inputs=[user_consented],
+        outputs=[landing_page, main_app]
+    )
+
+    user_consented.change(
+        lambda x: get_config(gr.Request()),
+        inputs=[user_consented],
+        outputs=[landing_page, main_app]
+    )
+
     # Function to show main app after consent
     def show_main_app():
         return gr.Group(visible=False), gr.Group(visible=True), True
 
-    # Connect consent button to show main app
     consent_btn.click(
         fn=show_main_app,
         inputs=[],
-        outputs=[landing_page, main_app, user_consented]
+        outputs=[landing_page, main_app, user_consented],
+        js="() => { window.set_cookie('feel_consent', 'true'); return true; }"
     )
 
     ##############################
