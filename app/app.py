@@ -564,8 +564,8 @@ button#add-language-btn {
     transform: translate(-50%, -50%) !important;
     z-index: 9999 !important;
     background: white !important;
-    padding: 20px !important;
-    border-radius: 10px !important;
+    padding: 10px !important;
+    border-radius: 8px !important;
     box-shadow: 0 4px 10px rgba(0,0,0,0.2) !important;
     max-width: 90% !important;
     width: 600px !important;
@@ -577,7 +577,7 @@ button#add-language-btn {
     left: 0 !important;
     width: 100% !important;
     height: 100% !important;
-    background-color: rgba(0, 0, 0, 0.5) !important;
+    background-color: rgba(0, 0, 0, 0.7) !important;
     z-index: 9998 !important;
 }
 """
@@ -585,25 +585,18 @@ button#add-language-btn {
 def get_config(request: gr.Request):
     """Get configuration from cookies"""
     config = {"feel_consent": False}
-    if request and 'feel_consent' in request.cookies:
-        config["feel_consent"] = request.cookies['feel_consent'] == 'true'
+    
+    if request and hasattr(request, 'cookies'):
+        for key in config.keys():
+            if key in request.cookies:
+                config[key] = request.cookies[key] == 'true'
+    
     return config["feel_consent"]
 
 js = '''function js(){
     window.set_cookie = function(key, value){
-        // Use a longer expiry and more complete cookie setting
-        const d = new Date();
-        d.setTime(d.getTime() + (365*24*60*60*1000));
-        document.cookie = key + "=" + value + ";path=/;expires=" + d.toUTCString() + ";SameSite=Lax";
-        return value === 'true';  // Return boolean directly
-    }
-    
-    window.check_cookie = function(key){
-        const value = document.cookie
-            .split('; ')
-            .find(row => row.startsWith(key + '='))
-            ?.split('=')[1];
-        return value === 'true';  // Return boolean directly
+        document.cookie = key+'='+value+'; Path=/; SameSite=Strict';
+        return [value];
     }
 }'''
 
@@ -703,11 +696,11 @@ with gr.Blocks(css=css, js=js) as demo:
         submit_btn = gr.Button(value="💾 Submit conversation", visible=False)
 
     # Overlay for the consent modal
-    with gr.Group(elem_classes=["modal-overlay"]) as consent_overlay:
+    with gr.Group(elem_classes=["modal-overlay"], visible=False) as consent_overlay:
         pass
         
     # Consent popup
-    with gr.Group(elem_classes=["consent-modal"]) as consent_modal:
+    with gr.Group(elem_classes=["consent-modal"], visible=False) as consent_modal:
         gr.Markdown("# User Agreement")
         with gr.Group(elem_classes=["user-agreement-container"]):
             gr.Markdown(USER_AGREEMENT)
@@ -721,17 +714,16 @@ with gr.Blocks(css=css, js=js) as demo:
     def update_visibility(has_consent):
         # Show/hide components based on consent status
         return (
-            gr.Group(visible=has_consent),  # main_app
+            gr.Group(visible=True),  # main_app
             gr.Group(visible=not has_consent),  # consent_overlay
             gr.Group(visible=not has_consent)   # consent_modal
         )
     
     # Initialize app with consent checking
-    demo.load(fn=initialize_consent_status, outputs=user_consented).then(
+    demo.load(fn=get_config, js=js, outputs=user_consented).then(
         fn=update_visibility,
         inputs=user_consented,
-        outputs=[main_app, consent_overlay, consent_modal],
-        js="async () => { await new Promise(r => setTimeout(r, 100)); const consented = window.check_cookie('feel_consent'); return consented; }"
+        outputs=[main_app, consent_overlay, consent_modal]
     )
 
     # Function to handle consent button click
@@ -741,7 +733,7 @@ with gr.Blocks(css=css, js=js) as demo:
     consent_btn.click(
         fn=handle_consent,
         outputs=user_consented,
-        js="() => { window.set_cookie('feel_consent', 'true'); return true; }"
+        js="(value) => set_cookie('feel_consent', 'true')"
     ).then(
         fn=update_visibility,
         inputs=user_consented,
