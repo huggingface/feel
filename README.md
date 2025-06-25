@@ -1,5 +1,5 @@
 ---
-title: Feel
+title: FeeL
 emoji: 🚀
 colorFrom: blue
 colorTo: gray
@@ -9,7 +9,7 @@ app_file: app/app.py
 pinned: false
 ---
 
-# Feel
+# FeeL
 
 Platform developed at MIT in collaboration with the HuggingFace platform and with inputs from IBM, Cohere, KAIST, and other independent collaborators. Aimed at improving performance of existing open source Large Language Models through real-time human feedback loop.
 
