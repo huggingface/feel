@@ -2,10 +2,13 @@ name: Proof HTML
 on:
   push:
   workflow_dispatch:
+permissions: {}
+
 jobs:
   build:
+    permissions: {}
     runs-on: ubuntu-latest
     steps:
-      - uses: anishathalye/proof-html@v1.1.0
+      - uses: anishathalye/proof-html@f060b7619c2410bd85d970459a60ef431cf47ed5 # v2.2.5
         with:
           directory: ./
